@@ -676,7 +676,7 @@ public class Essentials extends JavaPlugin implements net.ess3.api.IEssentials {
     }
 
     private int broadcastMessage(final IUser sender, final String permission, final String message, final boolean keywords) {
-        if (sender != null && sender.isHidden()) {
+        if (sender == null) {
             return 0;
         }
 
