@@ -25,13 +25,13 @@ public class Commandrepair extends EssentialsCommand {
     public void run(final Server server, final User user, final String commandLabel, final String[] args) throws Exception {
         if (args.length < 1 || args[0].equalsIgnoreCase("hand") || !user.isAuthorized("essentials.repair.all")) {
             repairHand(user);
-        } else if (args[0].equalsIgnoreCase("all")) {
+        } 
+        
+        else if (args[0].equalsIgnoreCase("all") && user.isAuthorized("essentials.repair.all")) {
             final Trade charge = new Trade("repair-all", ess);
             charge.isAffordableFor(user);
             repairAll(user);
             charge.charge(user);
-        } else {
-            throw new NotEnoughArgumentsException();
         }
     }
 
