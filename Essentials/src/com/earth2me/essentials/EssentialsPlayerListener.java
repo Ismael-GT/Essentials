@@ -7,6 +7,8 @@ import com.earth2me.essentials.textreader.TextPager;
 import com.earth2me.essentials.utils.DateUtil;
 import com.earth2me.essentials.utils.LocationUtil;
 import net.ess3.api.IEssentials;
+import net.ess3.nms.refl.ReflUtil;
+
 import org.bukkit.GameMode;
 import org.bukkit.Location;
 import org.bukkit.Material;
@@ -16,6 +18,7 @@ import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
+import org.bukkit.event.inventory.ClickType;
 import org.bukkit.event.inventory.InventoryClickEvent;
 import org.bukkit.event.inventory.InventoryCloseEvent;
 import org.bukkit.event.inventory.InventoryType;
@@ -25,6 +28,7 @@ import org.bukkit.event.player.PlayerTeleportEvent.TeleportCause;
 import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.InventoryHolder;
 import org.bukkit.inventory.ItemStack;
+import org.bukkit.inventory.PlayerInventory;
 
 import java.io.IOException;
 import java.text.NumberFormat;
@@ -49,6 +53,15 @@ public class EssentialsPlayerListener implements Listener {
         this.ess = parent;
     }
 
+    public void registerEvents() {
+        ess.getServer().getPluginManager().registerEvents(this, ess);
+        if (ReflUtil.getNmsVersionObject().isLowerThan(ReflUtil.V1_12_R1)) {
+            ess.getServer().getPluginManager().registerEvents(new PlayerListenerPre1_12(), ess);
+        } else {
+            ess.getServer().getPluginManager().registerEvents(new PlayerListener1_12(), ess);
+        }
+    }
+
     @EventHandler(priority = EventPriority.NORMAL)
     public void onPlayerRespawn(final PlayerRespawnEvent event) {
         final User user = ess.getUser(event.getPlayer());
@@ -66,7 +79,7 @@ public class EssentialsPlayerListener implements Listener {
         if (user.isMuted()) {
             event.setCancelled(true);
             user.sendMessage(tl("voiceSilenced"));
-            LOGGER.info(tl("mutedUserSpeaks", user.getName()));
+            LOGGER.info(tl("mutedUserSpeaks", user.getName(), event.getMessage()));
         }
         try {
             final Iterator<Player> it = event.getRecipients().iterator();
@@ -202,22 +215,6 @@ public class EssentialsPlayerListener implements Listener {
         dUser.updateActivity(false);
         dUser.stopTransaction();
 
-        IText tempInput = null;
-
-        if (!ess.getSettings().isCommandDisabled("motd")) {
-            try {
-                tempInput = new TextInput(dUser.getSource(), "motd", true, ess);
-            } catch (IOException ex) {
-                if (ess.getSettings().isDebug()) {
-                    LOGGER.log(Level.WARNING, ex.getMessage(), ex);
-                } else {
-                    LOGGER.log(Level.WARNING, ex.getMessage());
-                }
-            }
-        }
-
-        final IText input = tempInput;
-
         class DelayJoinTask implements Runnable {
             @Override
             public void run() {
@@ -262,10 +259,12 @@ public class EssentialsPlayerListener implements Listener {
                     ess.getServer().broadcastMessage(message);
                 }
 
-                if (input != null && user.isAuthorized("essentials.motd")) {
-                    final IText output = new KeywordReplacer(input, user.getSource(), ess);
-                    final TextPager pager = new TextPager(output, true);
-                    pager.showPage("1", null, "motd", user.getSource());
+                int motdDelay = ess.getSettings().getMotdDelay() / 50;
+                DelayMotdTask motdTask = new DelayMotdTask(user);
+                if (motdDelay > 0) {
+                    ess.scheduleSyncDelayedTask(motdTask, motdDelay);
+                } else {
+                    motdTask.run();
                 }
 
                 if (!ess.getSettings().isCommandDisabled("mail") && user.isAuthorized("essentials.mail")) {
@@ -301,6 +300,39 @@ public class EssentialsPlayerListener implements Listener {
                 }
 
                 user.stopTransaction();
+            }
+
+            class DelayMotdTask implements Runnable {
+                private User user;
+
+                public DelayMotdTask(User user) {
+                    this.user = user;
+                }
+
+                @Override
+                public void run() {
+                    IText tempInput = null;
+
+                    if (!ess.getSettings().isCommandDisabled("motd")) {
+                        try {
+                            tempInput = new TextInput(user.getSource(), "motd", true, ess);
+                        } catch (IOException ex) {
+                            if (ess.getSettings().isDebug()) {
+                                LOGGER.log(Level.WARNING, ex.getMessage(), ex);
+                            } else {
+                                LOGGER.log(Level.WARNING, ex.getMessage());
+                            }
+                        }
+                    }
+
+                    final IText input = tempInput;
+
+                    if (input != null && user.isAuthorized("essentials.motd")) {
+                        final IText output = new KeywordReplacer(input, user.getSource(), ess);
+                        final TextPager pager = new TextPager(output, true);
+                        pager.showPage("1", null, "motd", user.getSource());
+                    }
+                }
             }
         }
 
@@ -378,27 +410,33 @@ public class EssentialsPlayerListener implements Listener {
     public void onPlayerCommandPreprocess(final PlayerCommandPreprocessEvent event) {
         final Player player = event.getPlayer();
         final String cmd = event.getMessage().toLowerCase(Locale.ENGLISH).split(" ")[0].replace("/", "").toLowerCase(Locale.ENGLISH);
-        if (ess.getUser(player).isMuted() && (ess.getSettings().getMuteCommands().contains(cmd) || ess.getSettings().getMuteCommands().contains("*"))) {
-            event.setCancelled(true);
-            player.sendMessage(tl("voiceSilenced"));
-            LOGGER.info(tl("mutedUserSpeaks", player.getName()));
-            return;
-        }
-        
+
         PluginCommand pluginCommand = ess.getServer().getPluginCommand(cmd);
-        
+
         if (ess.getSettings().getSocialSpyCommands().contains(cmd) || ess.getSettings().getSocialSpyCommands().contains("*")) {
             if (pluginCommand == null
-                || (!pluginCommand.getName().equals("msg") && !pluginCommand.getName().equals("r"))) { // /msg and /r are handled in SimpleMessageRecipient
+                    || (!pluginCommand.getName().equals("msg") && !pluginCommand.getName().equals("r"))) { // /msg and /r are handled in SimpleMessageRecipient
                 User user = ess.getUser(player);
                 if (!user.isAuthorized("essentials.chat.spy.exempt")) {
                     for (User spyer : ess.getOnlineUsers()) {
                         if (spyer.isSocialSpyEnabled() && !player.equals(spyer.getBase())) {
-                            spyer.sendMessage(tl("socialSpyPrefix") + player.getDisplayName() + ": " + event.getMessage());
+                            if (user.isMuted() && ess.getSettings().getSocialSpyListenMutedPlayers()) {
+                                spyer.sendMessage(tl("socialSpyMutedPrefix") + player.getDisplayName() + ": " + event.getMessage());
+                            }
+                            else {
+                                spyer.sendMessage(tl("socialSpyPrefix") + player.getDisplayName() + ": " + event.getMessage());
+                            }
                         }
                     }
                 }
             }
+        }
+
+        if (ess.getUser(player).isMuted() && (ess.getSettings().getMuteCommands().contains(cmd) || ess.getSettings().getMuteCommands().contains("*"))) {
+            event.setCancelled(true);
+            player.sendMessage(tl("voiceSilenced"));
+            LOGGER.info(tl("mutedUserSpeaks", player.getName(), event.getMessage()));
+            return;
         }
         
         boolean broadcast = true; // whether to broadcast the updated activity
@@ -598,20 +636,18 @@ public class EssentialsPlayerListener implements Listener {
         return used;
     }
 
-    @EventHandler(priority = EventPriority.LOW, ignoreCancelled = true)
-    public void onPlayerPickupItem(final PlayerPickupItemEvent event) {
-        if (ess.getSettings().getDisableItemPickupWhileAfk()) {
-            if (ess.getUser(event.getPlayer()).isAfk()) {
-                event.setCancelled(true);
-            }
-        }
-    }
-
     @EventHandler(priority = EventPriority.LOWEST, ignoreCancelled = true)
     public void onInventoryClickEvent(final InventoryClickEvent event) {
         Player refreshPlayer = null;
         final Inventory top = event.getView().getTopInventory();
         final InventoryType type = top.getType();
+
+        final Inventory clickedInventory;
+        if (event.getRawSlot() < 0) {
+            clickedInventory = null;
+        } else {
+            clickedInventory = event.getRawSlot() < top.getSize() ? top : event.getView().getBottomInventory();
+        }
 
         if (type == InventoryType.PLAYER) {
             final User user = ess.getUser((Player) event.getWhoClicked());
@@ -641,6 +677,16 @@ public class EssentialsPlayerListener implements Listener {
             if (invHolder != null && invHolder instanceof HumanEntity && user.isInvSee()) {
                 event.setCancelled(true);
                 refreshPlayer = user.getBase();
+            }
+        } else if (clickedInventory != null && clickedInventory.getType() == InventoryType.PLAYER) {
+            if (ess.getSettings().isDirectHatAllowed() && event.getClick() == ClickType.LEFT && event.getSlot() == 39
+                && event.getCursor().getType() != Material.AIR && event.getCursor().getType().getMaxDurability() == 0
+                && ess.getUser(event.getWhoClicked()).isAuthorized("essentials.hat")) {
+                event.setCancelled(true);
+                final PlayerInventory inv = (PlayerInventory) clickedInventory;
+                final ItemStack head = inv.getHelmet();
+                inv.setHelmet(event.getCursor());
+                event.setCursor(head);
             }
         }
 
@@ -699,5 +745,29 @@ public class EssentialsPlayerListener implements Listener {
     public void onPlayerFishEvent(final PlayerFishEvent event) {
         final User user = ess.getUser(event.getPlayer());
         user.updateActivity(true);
+    }
+    
+    private final class PlayerListenerPre1_12 implements Listener {
+
+        @EventHandler(priority = EventPriority.LOW, ignoreCancelled = true)
+        public void onPlayerPickupItem(final org.bukkit.event.player.PlayerPickupItemEvent event) {
+            if (ess.getSettings().getDisableItemPickupWhileAfk()) {
+                if (ess.getUser(event.getPlayer()).isAfk()) {
+                    event.setCancelled(true);
+                }
+            }
+        }
+    }
+    
+    private final class PlayerListener1_12 implements Listener {
+
+        @EventHandler(priority = EventPriority.LOW, ignoreCancelled = true)
+        public void onPlayerPickupItem(final org.bukkit.event.entity.EntityPickupItemEvent event) {
+            if (ess.getSettings().getDisableItemPickupWhileAfk() && event.getEntity() instanceof Player) {
+                if (ess.getUser((Player) event.getEntity()).isAfk()) {
+                    event.setCancelled(true);
+                }
+            }
+        }
     }
 }

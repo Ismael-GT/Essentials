@@ -171,6 +171,10 @@ socialspy-commands:
   - ewhisper
   - pm
 
+# Whether the private and public messages from muted players should appear in the social spy.
+# If so, they will be differentiated from those sent by normal players.
+socialspy-listen-muted-players: true
+
 # Mute Commands
 # These commands will be disabled when a player is muted.
 # Use '*' to disable every command.
@@ -542,6 +546,10 @@ pastebin-createkit: true
 # This is useful when a sign sells or buys one item at a time and the player wants to sell a bunch at once.
 allow-bulk-buy-sell: true
 
+# Delay for the MOTD display for players on join, in milliseconds.
+# This has no effect if the MOTD command or permission are disabled.
+delay-motd: 0
+
 ############################################################
 # +------------------------------------------------------+ #
 # |                   EssentialsHome                     | #
@@ -574,6 +582,9 @@ sethome-multiple:
 # Set the timeout, in seconds for players to accept a tpa before the request is cancelled.
 # Set to 0 for no timeout.
 tpa-accept-cancellation: 120
+
+# Allow players to set hats by clicking on their helmet slot.
+allow-direct-hat: true
 
 ############################################################
 # +------------------------------------------------------+ #
